@@ -881,19 +881,7 @@ class PipelineRun:
             last_wake_up = self.hass.data[DATA_LAST_WAKE_UP].get(
                 result.wake_word_phrase
             )
-            if last_wake_up is not None:
-                sec_since_last_wake_up = time.monotonic() - last_wake_up
-                if sec_since_last_wake_up < WAKE_WORD_COOLDOWN:
-                    _LOGGER.debug(
-                        "Duplicate wake word detection occurred for %s",
-                        result.wake_word_phrase,
-                    )
-                    raise DuplicateWakeUpDetectedError(result.wake_word_phrase)
-
-            # Record last wake up time to block duplicate detections
-            self.hass.data[DATA_LAST_WAKE_UP][result.wake_word_phrase] = (
-                time.monotonic()
-            )
+            self._extract_last_wake_up(result, last_wake_up)
 
             if result.queued_audio:
                 # Add audio that was pending at detection.
@@ -924,6 +912,26 @@ class PipelineRun:
         )
 
         return result
+
+    def _extract_last_wake_up(
+        self, result: wake_word.DetectionResult, last_wake_up: float
+    ) -> None:
+        if last_wake_up is not None:
+            sec_since_last_wake_up = time.monotonic() - last_wake_up
+            self._extracxt_sec_since_last_wake_up(result, sec_since_last_wake_up)
+
+            # Record last wake up time to block duplicate detections
+        self.hass.data[DATA_LAST_WAKE_UP][result.wake_word_phrase] = time.monotonic()
+
+    def _extracxt_sec_since_last_wake_up(
+        self, result: wake_word.DetectionResult, sec_since_last_wake_up: float
+    ) -> None:
+        if sec_since_last_wake_up < WAKE_WORD_COOLDOWN:
+            _LOGGER.debug(
+                "Duplicate wake word detection occurred for %s",
+                result.wake_word_phrase,
+            )
+            raise DuplicateWakeUpDetectedError(result.wake_word_phrase)
 
     async def _wake_word_audio_stream(
         self,
