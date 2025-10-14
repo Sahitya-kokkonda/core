@@ -789,6 +789,7 @@ class PipelineRun:
 
         self.wake_word_entity_id = entity_id
         self.wake_word_entity = wake_word_entity
+        await asyncio.sleep(0)
 
     async def wake_word_detection(
         self,
