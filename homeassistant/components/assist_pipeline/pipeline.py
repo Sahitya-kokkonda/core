@@ -9,6 +9,7 @@ from collections.abc import AsyncGenerator, AsyncIterable, Callable
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 import logging
+import math
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
@@ -629,7 +630,7 @@ class PipelineRun:
     start_stage: PipelineStage
     end_stage: PipelineStage
     event_callback: PipelineEventCallback
-    language: str
+    language: str | None = None
     runner_data: Any | None = None
     intent_agent: conversation.AgentInfo | None = None
     tts_audio_output: str | dict[str, Any] | None = None
@@ -971,7 +972,7 @@ class PipelineRun:
                 message=f"No speech-to-text provider for: {engine}",
             )
 
-        metadata.language = self.pipeline.stt_language or self.language
+        metadata.language = self.pipeline.stt_language or self.language or ""
 
         if not stt_provider.check_metadata(metadata):
             raise SpeechToTextError(
@@ -994,7 +995,7 @@ class PipelineRun:
         if self.end_stage >= PipelineStage.INTENT and self.intent_agent:
             self.hass.async_create_background_task(
                 conversation.async_prepare_agent(
-                    self.hass, self.intent_agent.id, self.language
+                    self.hass, self.intent_agent.id, self.language or ""
                 ),
                 f"prepare conversation agent {self.intent_agent.id}",
             )
@@ -1620,7 +1621,9 @@ class PipelineRun:
         """Apply volume transformation only (no VAD/audio enhancements) with optional chunking."""
         timestamp_ms = 0
         async for chunk in audio_stream:
-            if self.audio_settings.volume_multiplier != 1.0:
+            if not math.isclose(
+                self.audio_settings.volume_multiplier, 1.0, rel_tol=1e-9
+            ):
                 chunk = _multiply_volume(chunk, self.audio_settings.volume_multiplier)
 
             for sub_chunk in chunk_samples(
@@ -1641,7 +1644,9 @@ class PipelineRun:
 
         timestamp_ms = 0
         async for dirty_samples in audio_stream:
-            if self.audio_settings.volume_multiplier != 1.0:
+            if not math.isclose(
+                self.audio_settings.volume_multiplier, 1.0, rel_tol=1e-9
+            ):
                 # Static gain
                 dirty_samples = _multiply_volume(
                     dirty_samples, self.audio_settings.volume_multiplier
