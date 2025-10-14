@@ -1770,13 +1770,7 @@ class PipelineInput:
         stt_audio_buffer: list[EnhancedAudioChunk] = []
         stt_processed_stream: AsyncIterable[EnhancedAudioChunk] | None = None
 
-        if self.stt_stream is not None:
-            if self.run.audio_settings.needs_processor:
-                # VAD/noise suppression/auto gain/volume
-                stt_processed_stream = self.run.process_enhance_audio(self.stt_stream)
-            else:
-                # Volume multiplier only
-                stt_processed_stream = self.run.process_volume_only(self.stt_stream)
+        stt_processed_stream = self._set_stt_processed_stream()
 
         try:
             if current_stage == PipelineStage.WAKE_WORD:
@@ -1797,25 +1791,7 @@ class PipelineInput:
                 assert self.stt_metadata is not None
                 assert stt_processed_stream is not None
 
-                if self.wake_word_phrase is not None:
-                    # Avoid duplicate wake-ups by checking cooldown
-                    last_wake_up = self.run.hass.data[DATA_LAST_WAKE_UP].get(
-                        self.wake_word_phrase
-                    )
-                    if last_wake_up is not None:
-                        sec_since_last_wake_up = time.monotonic() - last_wake_up
-                        if sec_since_last_wake_up < WAKE_WORD_COOLDOWN:
-                            _LOGGER.debug(
-                                "Speech-to-text cancelled to avoid duplicate wake-up for %s",
-                                self.wake_word_phrase,
-                            )
-                            raise DuplicateWakeUpDetectedError(self.wake_word_phrase)
-
-                    # Record last wake up time to block duplicate detections
-                    self.run.hass.data[DATA_LAST_WAKE_UP][self.wake_word_phrase] = (
-                        time.monotonic()
-                    )
-
+                self._run_duplicate_detection(stt_processed_stream)
                 stt_input_stream = stt_processed_stream
 
                 if stt_audio_buffer:
@@ -1845,34 +1821,20 @@ class PipelineInput:
                 tts_input = self.tts_input
                 all_targets_in_satellite_area = False
 
-                if current_stage == PipelineStage.INTENT:
-                    # intent-recognition
-                    assert intent_input is not None
-                    (
-                        tts_input,
-                        all_targets_in_satellite_area,
-                    ) = await self.run.recognize_intent(
-                        intent_input,
-                        self.session.conversation_id,
-                        self.conversation_extra_system_prompt,
-                    )
-                    if all_targets_in_satellite_area or tts_input.strip():
-                        current_stage = PipelineStage.TTS
-                    else:
-                        # Skip TTS
-                        current_stage = PipelineStage.END
+                (
+                    current_stage,
+                    tts_input,
+                    all_targets_in_satellite_area,
+                ) = await self._intent_recoznition(
+                    intent_input,
+                    all_targets_in_satellite_area,
+                    current_stage,
+                    tts_input,
+                )
 
-                if self.run.end_stage != PipelineStage.INTENT:
-                    # text-to-speech
-                    if current_stage == PipelineStage.TTS:
-                        if all_targets_in_satellite_area:
-                            # Use acknowledge media instead of full response
-                            await self.run.text_to_speech(
-                                tts_input or "", override_media_path=ACKNOWLEDGE_PATH
-                            )
-                        else:
-                            assert tts_input is not None
-                            await self.run.text_to_speech(tts_input)
+                await self._run_text_to_speech(
+                    current_stage, all_targets_in_satellite_area, tts_input
+                )
 
         except PipelineError as err:
             self.run.process_event(
@@ -1885,6 +1847,85 @@ class PipelineInput:
             # Always end the run since it needs to shut down the debug recording
             # thread, etc.
             await self.run.end()
+
+    async def _run_text_to_speech(
+        self,
+        current_stage: PipelineStage | None,
+        all_targets_in_satellite_area: bool,
+        tts_input: str | None,
+    ) -> None:
+        if self.run.end_stage != PipelineStage.INTENT:
+            # text-to-speech
+            if current_stage == PipelineStage.TTS:
+                if all_targets_in_satellite_area:
+                    # Use acknowledge media instead of full response
+                    await self.run.text_to_speech(
+                        tts_input or "", override_media_path=ACKNOWLEDGE_PATH
+                    )
+                else:
+                    assert tts_input is not None
+                    await self.run.text_to_speech(tts_input)
+
+    async def _intent_recoznition(
+        self,
+        intent_input: str | None,
+        all_targets_in_satellite_area: bool,
+        current_stage: PipelineStage | None,
+        tts_input: str | None,
+    ) -> tuple[PipelineStage | None, str | None, bool]:
+        if current_stage == PipelineStage.INTENT:
+            # intent-recognition
+            assert intent_input is not None
+            (
+                tts_input,
+                all_targets_in_satellite_area,
+            ) = await self.run.recognize_intent(
+                intent_input,
+                self.session.conversation_id,
+                self.conversation_extra_system_prompt,
+            )
+            if all_targets_in_satellite_area or tts_input.strip():
+                current_stage = PipelineStage.TTS
+            else:
+                # Skip TTS
+                current_stage = PipelineStage.END
+        return current_stage, tts_input, all_targets_in_satellite_area
+
+    def _run_duplicate_detection(
+        self, stt_processed_stream: AsyncIterable[EnhancedAudioChunk]
+    ) -> None:
+        if self.wake_word_phrase is not None:
+            # Avoid duplicate wake-ups by checking cooldown
+            last_wake_up = self.run.hass.data[DATA_LAST_WAKE_UP].get(
+                self.wake_word_phrase
+            )
+            self._verify_duplicate_wakeup(last_wake_up)
+
+            # Record last wake up time to block duplicate detections
+            self.run.hass.data[DATA_LAST_WAKE_UP][self.wake_word_phrase] = (
+                time.monotonic()
+            )
+
+    def _verify_duplicate_wakeup(self, last_wake_up: Any) -> None:
+        if last_wake_up is not None:
+            sec_since_last_wake_up = time.monotonic() - last_wake_up
+            if sec_since_last_wake_up < WAKE_WORD_COOLDOWN:
+                _LOGGER.debug(
+                    "Speech-to-text cancelled to avoid duplicate wake-up for %s",
+                    self.wake_word_phrase,
+                )
+                raise DuplicateWakeUpDetectedError(self.wake_word_phrase)
+
+    def _set_stt_processed_stream(self) -> AsyncIterable[EnhancedAudioChunk] | None:
+        stt_processed_stream = None
+        if self.stt_stream is not None:
+            if self.run.audio_settings.needs_processor:
+                # VAD/noise suppression/auto gain/volume
+                stt_processed_stream = self.run.process_enhance_audio(self.stt_stream)
+            else:
+                # Volume multiplier only
+                stt_processed_stream = self.run.process_volume_only(self.stt_stream)
+        return stt_processed_stream
 
     async def validate(self) -> None:
         """Validate pipeline input against start stage."""
