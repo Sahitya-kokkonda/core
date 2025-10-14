@@ -1791,7 +1791,7 @@ class PipelineInput:
                 assert self.stt_metadata is not None
                 assert stt_processed_stream is not None
 
-                self._run_duplicate_detection(stt_processed_stream)
+                self._run_duplicate_detection()
                 stt_input_stream = stt_processed_stream
 
                 if stt_audio_buffer:
@@ -1817,24 +1817,7 @@ class PipelineInput:
                 )
                 current_stage = PipelineStage.INTENT
 
-            if self.run.end_stage != PipelineStage.STT:
-                tts_input = self.tts_input
-                all_targets_in_satellite_area = False
-
-                (
-                    current_stage,
-                    tts_input,
-                    all_targets_in_satellite_area,
-                ) = await self._intent_recoznition(
-                    intent_input,
-                    all_targets_in_satellite_area,
-                    current_stage,
-                    tts_input,
-                )
-
-                await self._run_text_to_speech(
-                    current_stage, all_targets_in_satellite_area, tts_input
-                )
+            await self._run_end_stage(intent_input, current_stage)
 
         except PipelineError as err:
             self.run.process_event(
@@ -1847,6 +1830,28 @@ class PipelineInput:
             # Always end the run since it needs to shut down the debug recording
             # thread, etc.
             await self.run.end()
+
+    async def _run_end_stage(
+        self, intent_input: str | None, current_stage: PipelineStage | None
+    ) -> None:
+        if self.run.end_stage != PipelineStage.STT:
+            tts_input = self.tts_input
+            all_targets_in_satellite_area = False
+
+            (
+                current_stage,
+                tts_input,
+                all_targets_in_satellite_area,
+            ) = await self._intent_recoznition(
+                intent_input,
+                all_targets_in_satellite_area,
+                current_stage,
+                tts_input,
+            )
+
+            await self._run_text_to_speech(
+                current_stage, all_targets_in_satellite_area, tts_input
+            )
 
     async def _run_text_to_speech(
         self,
@@ -1891,9 +1896,7 @@ class PipelineInput:
                 current_stage = PipelineStage.END
         return current_stage, tts_input, all_targets_in_satellite_area
 
-    def _run_duplicate_detection(
-        self, stt_processed_stream: AsyncIterable[EnhancedAudioChunk]
-    ) -> None:
+    def _run_duplicate_detection(self) -> None:
         if self.wake_word_phrase is not None:
             # Avoid duplicate wake-ups by checking cooldown
             last_wake_up = self.run.hass.data[DATA_LAST_WAKE_UP].get(
