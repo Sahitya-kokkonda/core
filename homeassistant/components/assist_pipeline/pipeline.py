@@ -985,6 +985,7 @@ class PipelineRun:
             )
 
         self.stt_provider = stt_provider
+        await asyncio.sleep(0)
 
     async def speech_to_text(
         self,
@@ -1140,6 +1141,7 @@ class PipelineRun:
                 )
 
         self.intent_agent = agent_info
+        await asyncio.sleep(0)
 
     async def recognize_intent(
         self,
@@ -1507,6 +1509,7 @@ class PipelineRun:
                     f" {err}"
                 ),
             ) from err
+        await asyncio.sleep(0)
 
     async def text_to_speech(
         self, tts_input: str, override_media_path: Path | None = None
@@ -1542,6 +1545,7 @@ class PipelineRun:
         self.process_event(
             PipelineEvent(PipelineEventType.TTS_END, {"tts_output": tts_output})
         )
+        await asyncio.sleep(0)
 
     def _capture_chunk(self, audio_bytes: bytes | None) -> None:
         """Forward audio chunk to various capturing mechanisms."""
@@ -2149,6 +2153,7 @@ class PipelineStorageCollectionWebsocket(
             )
             return
         connection.send_result(msg["id"])
+        await asyncio.sleep(0)
 
 
 class PipelineRuns:
@@ -2180,6 +2185,7 @@ class PipelineRuns:
             # Create a temporary list in case the list is modified while we iterate
             for pipeline_run in pipeline_runs.values():
                 pipeline_run.abort_wake_word_detection = True
+                await asyncio.sleep(0)
 
 
 @dataclass(slots=True)
