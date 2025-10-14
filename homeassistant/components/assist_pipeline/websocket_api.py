@@ -159,29 +159,27 @@ async def websocket_run(
         incoming_sample_rate = msg_input["sample_rate"]
         wake_word_phrase: str | None = None
 
-        if start_stage == PipelineStage.WAKE_WORD:
-            wake_word_settings = WakeWordSettings(
-                timeout=msg["input"].get("timeout", DEFAULT_WAKE_WORD_TIMEOUT),
-                audio_seconds_to_buffer=msg_input.get("audio_seconds_to_buffer", 0),
-            )
-        elif start_stage == PipelineStage.STT:
-            wake_word_phrase = msg["input"].get("wake_word_phrase")
+        wake_word_settings, wake_word_phrase = _start_page(msg, start_stage, msg_input)
 
         async def stt_stream() -> AsyncGenerator[bytes]:
             state = None
 
             # Yield until we receive an empty chunk
             while chunk := await audio_queue.get():
-                if incoming_sample_rate != SAMPLE_RATE:
-                    chunk, state = audioop.ratecv(
-                        chunk,
-                        SAMPLE_WIDTH,
-                        SAMPLE_CHANNELS,
-                        incoming_sample_rate,
-                        SAMPLE_RATE,
-                        state,
-                    )
+                chunk = _extract_chuck(chunk, state)
                 yield chunk
+
+        def _extract_chuck(chunk: bytes, state: audioop._RatecvState | None) -> bytes:
+            if incoming_sample_rate != SAMPLE_RATE:
+                chunk, state = audioop.ratecv(
+                    chunk,
+                    SAMPLE_WIDTH,
+                    SAMPLE_CHANNELS,
+                    incoming_sample_rate,
+                    SAMPLE_RATE,
+                    state,
+                )
+            return chunk
 
         def handle_binary(
             _hass: HomeAssistant,
@@ -272,6 +270,21 @@ async def websocket_run(
             if unregister_handler is not None:
                 # Unregister binary handler
                 unregister_handler()
+
+
+def _start_page(
+    msg: dict[str, Any], start_stage: PipelineStage, msg_input: Any
+) -> tuple[WakeWordSettings | None, str | None]:
+    wake_word_settings: WakeWordSettings | None = None
+    wake_word_phrase: str | None = None
+    if start_stage == PipelineStage.WAKE_WORD:
+        wake_word_settings = WakeWordSettings(
+            timeout=msg["input"].get("timeout", DEFAULT_WAKE_WORD_TIMEOUT),
+            audio_seconds_to_buffer=msg_input.get("audio_seconds_to_buffer", 0),
+        )
+    elif start_stage == PipelineStage.STT:
+        wake_word_phrase = msg["input"].get("wake_word_phrase")
+    return wake_word_settings, wake_word_phrase
 
 
 @callback
