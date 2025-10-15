@@ -26,6 +26,7 @@ from homeassistant.components.assist_pipeline import (
     async_pipeline_from_audio_stream,
     vad,
 )
+from homeassistant.components.assist_pipeline.pipeline import PipelineContext
 from homeassistant.components.media_player import async_process_play_media_url
 from homeassistant.core import Context, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -519,8 +520,6 @@ class AssistSatelliteEntity(entity.Entity):
                             channel=stt.AudioChannels.CHANNEL_MONO,
                         ),
                         stt_stream=audio_stream,
-                        pipeline_id=self._resolve_pipeline(),
-                        conversation_id=session.conversation_id,
                         device_id=device_id,
                         satellite_id=self.entity_id,
                         tts_audio_output=self.tts_options,
@@ -528,9 +527,13 @@ class AssistSatelliteEntity(entity.Entity):
                         audio_settings=AudioSettings(
                             silence_seconds=self._resolve_vad_sensitivity()
                         ),
-                        start_stage=start_stage,
-                        end_stage=end_stage,
-                        conversation_extra_system_prompt=extra_system_prompt,
+                        pipeline_context=PipelineContext(
+                            conversation_id=session.conversation_id,
+                            pipeline_id=self._resolve_pipeline(),
+                            start_stage=start_stage,
+                            end_stage=end_stage,
+                            conversation_extra_system_prompt=extra_system_prompt,
+                        ),
                     ),
                     f"{self.entity_id}_pipeline",
                 )
