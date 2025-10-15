@@ -1422,13 +1422,74 @@ class PipelineRun:
 
         return (speech, all_targets_in_satellite_area)
 
+    # def _get_all_targets_in_satellite_area(
+    #     self,
+    #     intent_response: intent.IntentResponse,
+    #     satellite_id: str | None,
+    #     device_id: str | None,
+    # ) -> bool:
+    #     """Return true if all targeted entities were in the same area as the device."""
+    #     if (
+    #         intent_response.response_type != intent.IntentResponseType.ACTION_DONE
+    #         or not intent_response.matched_states
+    #     ):
+    #         return False
+
+    #     entity_registry = er.async_get(self.hass)
+    #     device_registry = dr.async_get(self.hass)
+
+    #     area_id: str | None = None
+
+    #     if (
+    #         satellite_id is not None
+    #         and (target_entity_entry := entity_registry.async_get(satellite_id))
+    #         is not None
+    #     ):
+    #         area_id = target_entity_entry.area_id
+    #         device_id = target_entity_entry.device_id
+
+    #     if area_id is None:
+    #         if device_id is None:
+    #             return False
+
+    #         device_entry = device_registry.async_get(device_id)
+    #         if device_entry is None:
+    #             return False
+
+    #         area_id = device_entry.area_id
+    #         if area_id is None:
+    #             return False
+
+    #     for state in intent_response.matched_states:
+    #         target_entity_entry = entity_registry.async_get(state.entity_id)
+    #         if target_entity_entry is None:
+    #             return False
+
+    #         target_area_id = target_entity_entry.area_id
+    #         if target_area_id is None:
+    #             if target_entity_entry.device_id is None:
+    #                 return False
+
+    #             target_device_entry = device_registry.async_get(
+    #                 target_entity_entry.device_id
+    #             )
+    #             if target_device_entry is None:
+    #                 return False
+
+    #             target_area_id = target_device_entry.area_id
+
+    #         if target_area_id != area_id:
+    #             return False
+
+    #     return True
+
     def _get_all_targets_in_satellite_area(
         self,
         intent_response: intent.IntentResponse,
         satellite_id: str | None,
         device_id: str | None,
     ) -> bool:
-        """Return true if all targeted entities were in the same area as the device."""
+        """Return True if all targeted entities were in the same area as the device."""
         if (
             intent_response.response_type != intent.IntentResponseType.ACTION_DONE
             or not intent_response.matched_states
@@ -1438,47 +1499,65 @@ class PipelineRun:
         entity_registry = er.async_get(self.hass)
         device_registry = dr.async_get(self.hass)
 
-        area_id: str | None = None
-
-        if (
-            satellite_id is not None
-            and (target_entity_entry := entity_registry.async_get(satellite_id))
-            is not None
-        ):
-            area_id = target_entity_entry.area_id
-            device_id = target_entity_entry.device_id
-
+        area_id = self._resolve_area_id(
+            entity_registry, device_registry, satellite_id, device_id
+        )
         if area_id is None:
-            if device_id is None:
-                return False
+            return False
 
+        return self._targets_match_area(
+            entity_registry, device_registry, intent_response.matched_states, area_id
+        )
+
+    def _resolve_area_id(
+        self,
+        entity_registry: er.EntityRegistry,
+        device_registry: dr.DeviceRegistry,
+        satellite_id: str | None,
+        device_id: str | None,
+    ) -> str | None:
+        """Resolve the reference area_id from either satellite_id or device_id."""
+        if satellite_id:
+            entity_entry = entity_registry.async_get(satellite_id)
+            if entity_entry:
+                if entity_entry.area_id:
+                    return entity_entry.area_id
+                if entity_entry.device_id:
+                    device_entry = device_registry.async_get(entity_entry.device_id)
+                    if device_entry:
+                        return device_entry.area_id
+                return None
+
+        if device_id:
             device_entry = device_registry.async_get(device_id)
-            if device_entry is None:
+            if device_entry:
+                return device_entry.area_id
+
+        return None
+
+    def _targets_match_area(
+        self,
+        entity_registry: er.EntityRegistry,
+        device_registry: dr.DeviceRegistry,
+        matched_states: list,
+        reference_area_id: str,
+    ) -> bool:
+        """Return True if all matched states belong to the same area."""
+        for state in matched_states:
+            target_entry = entity_registry.async_get(state.entity_id)
+            if not target_entry:
                 return False
 
-            area_id = device_entry.area_id
-            if area_id is None:
-                return False
-
-        for state in intent_response.matched_states:
-            target_entity_entry = entity_registry.async_get(state.entity_id)
-            if target_entity_entry is None:
-                return False
-
-            target_area_id = target_entity_entry.area_id
+            target_area_id = target_entry.area_id
             if target_area_id is None:
-                if target_entity_entry.device_id is None:
+                if not target_entry.device_id:
                     return False
-
-                target_device_entry = device_registry.async_get(
-                    target_entity_entry.device_id
-                )
-                if target_device_entry is None:
+                device_entry = device_registry.async_get(target_entry.device_id)
+                if not device_entry:
                     return False
+                target_area_id = device_entry.area_id
 
-                target_area_id = target_device_entry.area_id
-
-            if target_area_id != area_id:
+            if target_area_id != reference_area_id:
                 return False
 
         return True
