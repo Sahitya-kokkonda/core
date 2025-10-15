@@ -1456,23 +1456,24 @@ class PipelineRun:
         device_id: str | None,
     ) -> str | None:
         """Resolve the reference area_id from either satellite_id or device_id."""
+
+        def _get_device_area(device_id: str | None) -> str | None:
+            if device_id:
+                device_entry = device_registry.async_get(device_id)
+                if device_entry:
+                    return device_entry.area_id
+            return None
+
+        # Try resolving from satellite_id first
         if satellite_id:
             entity_entry = entity_registry.async_get(satellite_id)
             if entity_entry:
                 if entity_entry.area_id:
                     return entity_entry.area_id
-                if entity_entry.device_id:
-                    device_entry = device_registry.async_get(entity_entry.device_id)
-                    if device_entry:
-                        return device_entry.area_id
-                return None
+                return _get_device_area(entity_entry.device_id)
 
-        if device_id:
-            device_entry = device_registry.async_get(device_id)
-            if device_entry:
-                return device_entry.area_id
-
-        return None
+        # Fallback to resolving from device_id directly
+        return _get_device_area(device_id)
 
     def _targets_match_area(
         self,
